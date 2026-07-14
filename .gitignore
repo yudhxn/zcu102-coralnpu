@@ -1,0 +1,42 @@
+# ── FPGA / Vivado ──────────────────────────────
+# Vivado는 수 GB짜리 중간 산출물을 뱉는다. 절대 커밋하지 말 것.
+*.jou
+*.log
+*.str
+*.rpx
+.Xil/
+*.cache/
+*.hw/
+*.ip_user_files/
+*.runs/
+*.sim/
+*.gen/
+*.xpr
+vivado*.backup.jou
+vivado*.backup.log
+
+# ── 대용량 산출물 ──────────────────────────────
+# bitstream/이미지는 GitHub 100MB 제한에 걸린다. 필요하면 Git LFS.
+*.bit
+*.bin
+BOOT.BIN
+image.ub
+*.caffemodel
+*.nvdla
+
+# ── PetaLinux ─────────────────────────────────
+build/
+images/
+components/
+*.tar.gz
+
+# ── NVDLA 빌드 ────────────────────────────────
+outdir/
+*.o
+*.ko
+*.so
+
+# ── 기타 ──────────────────────────────────────
+__pycache__/
+.venv/
+.DS_Store
