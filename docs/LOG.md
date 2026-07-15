@@ -19,9 +19,18 @@
 
 
 ### 2026-07-15 (수)
+[오전~오후: 보드 진단]
 - 결과: AMD 2019.1 프리빌트 이미지로 부팅 → 로그인까지 성공 ✅
 - 하드웨어 확인: 커널 4.19 aarch64 / CPU 4 / FPGA operating (전부 정상)
-- 원인 확정: 어제 멈춤 = ITRI 2018.3 FSBL ↔ 보드 Rev 1.1 불일치
+- 원인 확정: 멈춤 원인 = ITRI 2018.3 FSBL ↔ 보드 Rev 1.1 불일치
 - 네트워크: IP 수동 할당(10.126.37.57) + SSH 접속 성공
   (ssh -o HostKeyAlgorithms=+ssh-rsa 옵션 필요, VS Code는 BusyBox라 불가)
-- 다음: 리눅스 서버 Vitis 2019.1 설치 →
+
+[오후~저녁: 이론 + 파일 분석]
+- 이론: 부팅 5단계 릴레이 이해 (BootROM→FSBL→PMU/ATF→U-Boot→Linux)
+- .bif 분석: ITRI의 SD_BOOT.bif에 [pmufw_image] 줄이 없음
+  → PMU 누락 확인, "PMU-FW is not running" + Rev1.1 실패의 직접 원인
+- .hdf 확인: zcu102_base_trd_wrapper.hdf가 산2의 핵심 재료 (비트스트림 포함)
+- Vitis 버전: PC는 2026.1이라 .hdf 호환 안 됨 → 서버에 2019.1 별도 설치 필요
+
+- 다음: 서버 허가(VPN/계정/Vitis 2019.1 설치) 받기 → FSBL/PMU 생성 → BOOT.bin 재조립
