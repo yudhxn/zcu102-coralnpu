@@ -34,3 +34,13 @@
 - Vitis 버전: PC는 2026.1이라 .hdf 호환 안 됨 → 서버에 2019.1 별도 설치 필요
 
 - 다음: 서버 허가(VPN/계정/Vitis 2019.1 설치) 받기 → FSBL/PMU 생성 → BOOT.bin 재조립
+
+### 2026-07-16일 — Coral NPU로 방향 전환
+- 교수님 지시: NVDLA → Google Coral NPU (ZCU102에 Coral 올리기)
+- 목표: 합성(FPGA) → 실제 추론까지
+- 팩트체크: 레포 활발(별2.4k), fpga/platforms 폴더 존재, 매트릭스코어 M3 릴리스됨(2026-04-27)
+  빌드=Bazel, 언어=SystemVerilog/Scala, Verilator 시뮬 가능
+- 미확인: platforms에 ZCU102 지원 있는지 (난이도 좌우) → 서버에서 확인
+- 재활용: 보드부팅/FSBL/PMU/bootgen/SSH/서버 다 그대로 쓰임 (특히 BOOT.bin 만들기)
+- 다음: 교수님께 범위/마감 확인 + 서버 접속(VPN/계정) 받기 → platforms 확인 → 시뮬 M1
+- 새 계획: 05_notes/PLAN_coral_7weeks.md
