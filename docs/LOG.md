@@ -1,46 +1,34 @@
+### 2026-07-20 (월) — Coral NPU 전환 및 빌드 환경 구축
 
----
+[방향 전환]
+- 교수님 지시로 대상 NPU를 NVDLA → **Google Coral NPU** 로 변경
+- 목표: ZCU102에서 input → 추론 → output 동작 (베어메탈)
+- 선배 확인: 리눅스 서버 불필요, 윈도우 Vivado 2026.1로 진행
 
-### YYYY-MM-DD (요일)
-- **목표:**
-- **한 일:**
-- **막힌 것:**
-- **해결/원인:**
-- **다음:**
+[Coral 레포 조사]
+- fpga/README.md 확인 → **Google 사내 보드("Nexus") 전용 문서**
+  · nexusXX.mtv.corp.google.com 접속, nexus_loader / zturn 등 비공개 사내 도구 사용
+  · ZCU102를 포함해 공개 보드 지원은 없음 → AXI/XDC 직접 작성 필요
+- hdl/verilog/ 에는 Sram.v, ClockGate.sv, RstSync.sv 등 부품 셀만 존재
+  · NPU 본체는 hdl/chisel (Scala) → **Bazel로 Verilog 생성 단계 필요**
+- fpga/coralnpu_soc.core 분석
+  · vivado 합성 타깃 존재, FPGA_XILINX / USE_GENERIC 파라미터 있음 (긍정)
+  · 단, part = "xcvu13p-fhga2104-2-e" (Virtex UltraScale+, 약 3,780K LC)
+  · ZCU102(ZU9EG)는 약 600K → **6배 이상 작음.** SoC 전체 합성은 불가 예상
+  · 대응: NPU 코어만 분리 합성 → 축소 범위 자체를 분석 결과로 삼음
 
----
+[환경 구축 — 완료]
+- WSL2 + Ubuntu 22.04 설치 (윈도우 유지, 듀얼부팅 아님)
+  · 초기 OOBE가 멈춰 wsl --unregister 후 재설치하여 해결
+- build-essential / git / python3(3.10) / srecord / curl / zip / unzip 설치
+- bazelisk 설치 → /usr/local/bin/bazel
+- coralnpu 레포 clone (리눅스 홈 ~/coralnpu, 윈도우 경로는 빌드 속도 문제로 회피)
+- .bazelversion = **8.6.0** (README의 7.4.1과 상이하나 bazelisk가 자동 처리)
 
-### 2026-07-14 (화)
-- 한 일: GitHub 레포 세팅 / ITRI-OpenDLA 확보 / BOOT.bin 발견
-        / CP210x 드라이버 설치 / 보드 첫 부팅 시도
-- 막힌 것: FSBL 배너 3줄 후 정지. "PMU-FW is not running"
-- 원인 추정: ITRI BOOT.bin = 2018.3 FSBL, 보드 = Rev 1.1 → 궁합 문제
-- 다음: Xilinx 공식 프리빌트 이미지로 진단 확정
+[진행 중]
+- bazel build //examples:coralnpu_v2_hello_world_add_floats (첫 빌드, 장시간 소요)
 
-
-### 2026-07-15 (수)
-[오전~오후: 보드 진단]
-- 결과: AMD 2019.1 프리빌트 이미지로 부팅 → 로그인까지 성공 ✅
-- 하드웨어 확인: 커널 4.19 aarch64 / CPU 4 / FPGA operating (전부 정상)
-- 원인 확정: 멈춤 원인 = ITRI 2018.3 FSBL ↔ 보드 Rev 1.1 불일치
-- 네트워크: IP 수동 할당(10.126.37.57) + SSH 접속 성공
-  (ssh -o HostKeyAlgorithms=+ssh-rsa 옵션 필요, VS Code는 BusyBox라 불가)
-
-[오후~저녁: 이론 + 파일 분석]
-- 이론: 부팅 5단계 릴레이 이해 (BootROM→FSBL→PMU/ATF→U-Boot→Linux)
-- .bif 분석: ITRI의 SD_BOOT.bif에 [pmufw_image] 줄이 없음
-  → PMU 누락 확인, "PMU-FW is not running" + Rev1.1 실패의 직접 원인
-- .hdf 확인: zcu102_base_trd_wrapper.hdf가 산2의 핵심 재료 (비트스트림 포함)
-- Vitis 버전: PC는 2026.1이라 .hdf 호환 안 됨 → 서버에 2019.1 별도 설치 필요
-
-- 다음: 서버 허가(VPN/계정/Vitis 2019.1 설치) 받기 → FSBL/PMU 생성 → BOOT.bin 재조립
-
-### 2026-07-16일 — Coral NPU로 방향 전환
-- 교수님 지시: NVDLA → Google Coral NPU (ZCU102에 Coral 올리기)
-- 목표: 합성(FPGA) → 실제 추론까지
-- 팩트체크: 레포 활발(별2.4k), fpga/platforms 폴더 존재, 매트릭스코어 M3 릴리스됨(2026-04-27)
-  빌드=Bazel, 언어=SystemVerilog/Scala, Verilator 시뮬 가능
-- 미확인: platforms에 ZCU102 지원 있는지 (난이도 좌우) → 서버에서 확인
-- 재활용: 보드부팅/FSBL/PMU/bootgen/SSH/서버 다 그대로 쓰임 (특히 BOOT.bin 만들기)
-- 다음: 교수님께 범위/마감 확인 + 서버 접속(VPN/계정) 받기 → platforms 확인 → 시뮬 M1
-- 새 계획: 05_notes/PLAN_coral_7weeks.md
+[다음]
+- M1: 예제 빌드 성공 확인
+- M2: Verilator 시뮬에서 Coral 실행 + mcycle 카운터 측정
+- M3: NPU 코어 분리 → ZCU102 타깃 합성, 리소스 리포트 확보
