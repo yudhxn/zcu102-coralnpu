@@ -1,15 +1,165 @@
+# 실험 일지
+
+> **규칙: 삽질한 것도 반드시 적는다.**
+> 8/31에 교수님이 가장 관심 있게 볼 파일이 이거다.
+> "무엇이 안 됐고, 왜 안 됐고, 어떻게 알아냈는가"가 결과물이다.
+> 매일 5분. 밀리면 기억 안 나서 못 쓴다.
+
+---
+
+### 2026-07-14 (화) — 프로젝트 시작 (NVDLA 단계)
+
+- 목표: 개발 환경 파악, ITRI-OpenDLA 확보, 보드 첫 부팅
+- 한 일:
+  · GitHub 레포 생성 및 프로젝트 뼈대 커밋
+  · ITRI-OpenDLA 다운로드 → `nvsmall64_zcu102/a38/project_1.sdk/SD_BOOT/bootimage/`
+    에서 사전빌드 **BOOT.bin (17.8MB)** 발견
+    → 비트스트림이 통째로 포함된 크기. 베어메탈 구조로 추정되어
+      PetaLinux/리눅스 서버 없이도 진행 가능하다고 판단
+  · CP210x 드라이버 설치 (CP2108 Interface 0~3 → COM6/3/4/5)
+    ⚠️ UART는 **Interface 0** 사용. COM 번호가 가장 낮은 것이 아님(COM6)
+  · SD카드(FAT32)에 BOOT.bin 복사, SW6 = 1-ON / 2,3,4-OFF, PuTTY 115200
+- 결과: **FSBL 배너 3줄 출력 후 정지**
+  ```
+  Xilinx Zynq MP First Stage Boot Loader
+  Release 2018.3
+  PMU-FW is not running, certain applications may not be supported.
+  ```
+- 원인 추정: ITRI BOOT.bin의 2018.3 FSBL ↔ 보드 Rev 1.1 불일치
+- 다음: Xilinx 공식 프리빌트 이미지로 진단 확정
+
+---
+
+### 2026-07-15 (수) — 원인 확정 + 부팅 성공 (NVDLA 단계)
+
+[보드 진단]
+- AMD 공식 ZCU102 **2019.1 프리빌트 이미지**(BOOT.BIN + image.ub)로 부팅 테스트
+- 결과: **로그인 프롬프트까지 정상 부팅 성공** ✅
+  ```
+  PetaLinux 2019.1 xilinx-zcu102-2019_1 /dev/ttyPS0
+  xilinx-zcu102-2019_1 login: root
+  ```
+- 하드웨어 확인: 커널 4.19 aarch64 / nproc=4 / FPGA state=operating (전부 정상)
+- **원인 확정: 어제 멈춤 = ITRI의 2018.3 FSBL ↔ 보드 Rev 1.1 불일치**
+  → 보드·SD·UART·스위치는 모두 정상. 순수 소프트웨어(FSBL 버전) 문제
+
+[네트워크 / SSH]
+- 보드에 IP 수동 할당 (10.126.37.57)
+- SSH 접속 성공. 단, 옵션 필요:
+  `ssh -o HostKeyAlgorithms=+ssh-rsa root@10.126.37.57`
+  → 보드의 Dropbear(2019년)는 ssh-rsa만 지원, 최신 OpenSSH가 거부하기 때문
+- **VS Code Remote-SSH는 불가.** 보드 리눅스가 BusyBox라
+  `tar --no-same-owner`, `wget --no-config` 미지원 → VS Code 서버 설치 실패
+  → 임베디드 보드에는 구조적으로 붙지 않음. 순수 SSH 터미널은 정상 동작
+
+[이론 학습]
+- 부팅 5단계 릴레이 이해:
+  BootROM → FSBL → PMU/ATF → U-Boot → Linux
+- BOOT.bin = FSBL + PMU + ATF + 비트스트림 + U-Boot 를 묶은 파일
+
+[.bif 분석 — 핵심 발견]
+- ITRI의 `SD_BOOT.bif` 내용:
+  ```
+  the_ROM_image:
+  {
+      [fsbl_config]a53_x64
+      [bootloader]...\SD_BOOT.elf
+      [destination_device = pl]...\zcu102_base_trd_wrapper.bit
+  }
+  ```
+- **`[pmufw_image]` 항목이 아예 없음** → PMU 펌웨어 누락 확인
+  → "PMU-FW is not running" + Rev 1.1 부팅 실패의 직접 원인
+- 해결 방향: 비트스트림(.bit)은 유지, FSBL 교체 + PMU 추가 → bootgen 재조립
+- `.hdf`(zcu102_base_trd_wrapper.hdf)가 FSBL/PMU 생성의 핵심 재료
+- Vivado 2026.1은 `.hdf` 미지원(2019.2부터 .xsa) → 구버전 필요 확인
+
+---
+
+### 2026-07-15 (수) 밤 — Coral NPU로 방향 전환
+
+- **교수님 지시로 대상 NPU 변경: NVDLA → Google Coral NPU**
+- 목표: ZCU102에 Coral을 올려 input → 추론 → output 동작
+
+[Coral NPU 팩트체크]
+- Google Research/DeepMind 공동 설계, 2025년 10월 공개 오픈소스 NPU
+- 32-bit RISC-V ISA 기반, matrix + vector(SIMD) + scalar 3부 구성
+- 레포 활발 (커밋 1,403 / 별 2.4k), fpga·platforms·hdl 폴더 존재
+- 매트릭스 코어 릴리스 확인 (M3-2026-04-27)
+- 빌드 = Bazel, 언어 = SystemVerilog/Scala(Chisel), Verilator 시뮬 가능
+
+[판단]
+- 불가능하지 않음. 단 NVDLA보다 어렵고 ZCU102 레퍼런스가 없음
+- 안전망: Verilator 시뮬 진입이 쉬워 최악의 경우 시뮬 검증까지는 확보 가능
+- 재활용 가능한 자산: 보드 부팅 절차 / FSBL·PMU / bootgen / 부팅 5단계 원리
+  → 특히 BOOT.bin 생성 단계는 이미 절반 습득한 상태
+
+---
+
+### 2026-07-20 (월) — 빌드 환경 구축 및 시뮬레이션 실행 성공
+
+[선배 확인]
+- 리눅스 서버 불필요. 윈도우 Vivado 2026.1로 진행
+- 목표 수준: "보드에서 input/output만 되면 된다" → 베어메탈 방식으로 확정
+
+[Coral 레포 조사]
+- `fpga/README.md` → **Google 사내 보드("Nexus") 전용 문서**
+  · nexusXX.mtv.corp.google.com 접속, `nexus_loader` / `zturn` 등 비공개 사내 도구 사용
+  · ZCU102 포함 공개 보드 지원 없음 → AXI 연결·XDC 직접 작성 필요
+- `hdl/verilog/` 에는 Sram.v, ClockGate.sv, RstSync.sv 등 부품 셀만 존재
+  · NPU 본체는 `hdl/chisel` (Scala) → Bazel로 Verilog 생성 단계 필요
+- `fpga/coralnpu_soc.core` 분석
+  · vivado 합성 타깃 존재, `FPGA_XILINX` / `USE_GENERIC` 파라미터 있음 (긍정)
+  · part = `xcvu13p-fhga2104-2-e` (Virtex UltraScale+, 약 3,780K LC)
+  · ZCU102(ZU9EG)는 약 600K → **6배 이상 작음.** SoC 전체 합성 불가 예상
+  · 대응: NPU 코어만 분리 합성
+
+[환경 구축]
+- **WSL2 + Ubuntu 22.04** 설치 (윈도우 유지, 듀얼부팅 아님)
+  · 초기 OOBE 멈춤 → `wsl --unregister` 후 재설치로 해결
+- build-essential / git / python3(3.10) / srecord / curl / zip / unzip
+- bazelisk → `/usr/local/bin/bazel`
+- coralnpu clone (리눅스 홈 `~/coralnpu`. 윈도우 경로는 빌드 속도 문제로 회피)
+- `.bazelversion` = **8.6.0** (README의 7.4.1과 상이하나 bazelisk가 자동 처리)
+
+[빌드 & 실행 — 성공]
+1. 예제 빌드 (222s)
+   `bazel build //examples:coralnpu_v2_hello_world_add_floats`
+   → .elf / .bin / .vmem 생성
+2. 시뮬레이터 빌드 (368s)
+   `bazel build //tests/verilator_sim:core_mini_axi_sim`
+   → 로그에 `core_mini_axi_cc_library_emit_verilog` 확인
+   → **Chisel → Verilog 변환이 실제로 수행됨**
+   → Verilator: 124 modules, 1.592 MB sources (합성 재료 확보)
+3. 시뮬레이션 실행 성공
+   → "Simulation stopped by user" 정상 종료 (core dump 없음)
+   → **Coral NPU RTL이 로컬에서 RISC-V 바이너리를 실제 실행함**
+
+[삽질 기록 — 경로 문제]
+- examples(RISC-V)와 verilator_sim(x86)이 서로 다른 빌드 설정
+  → 하나를 빌드하면 `bazel-bin` 심볼릭 링크가 그쪽으로 이동,
+    다른 하나가 "No such file or directory"로 사라짐
+- 출력 경로가 서로 다름:
+  · 시뮬레이터: `bazel-out/k8-fastbuild/`
+  · ELF:        `bazel-out/k8-fastbuild-ST-dd8dc713f32d/`
+- 해결: 양쪽 모두 **절대 경로**로 지정. `~/.bashrc`에 `$SIM` / `$ELF` / `$RTL` 등록
+
+[결과] ✅ M1 완료 / ✅ M2 진입
+
+---
+
 ### 2026-07-20 (월) — M3 달성: Coral NPU ZCU102 합성 성공 ✅
 
 [합성 조건]
 - 도구: Vivado 2026.1 (Windows)
-- 타깃: xczu9eg-ffvb1156-2-e (ZCU102 Evaluation Board)
+- 타깃: `xczu9eg-ffvb1156-2-e` (ZCU102 Evaluation Board)
 - Top module: **CoreMiniAxi**
-- 소스: CoreMiniAxi.sv 단일 파일 (36,725줄 / 1.6MB)
-  · Chisel → Verilog 생성물 (Bazel `emit_verilog`)
+- 소스: `CoreMiniAxi.sv` 단일 파일 (36,725줄 / 1.6MB)
+  · Chisel → Verilog 생성물
   · ClockGate, RstSync, Sram 모듈이 모두 내장되어 있어 추가 파일 불필요
+    (별도 파일을 함께 추가하면 module redefinition 오류)
 - Verilog define: **`SYNTHESIS`**
   · 이 define이 SRAM 구현 분기를 결정함
-  · 정의 시 → 합성 가능한 동작 기술 메모리 (`bit [127:0] mem[...]`) → BRAM 추론
+  · 정의 시 → 합성 가능한 동작 기술 메모리(`bit [127:0] mem[...]`) → BRAM 추론
   · 미정의 시 → DPI-C 기반 시뮬 전용 메모리 (합성 불가)
   · USE_TSMC12FFC / USE_GF12LPP / USE_GF22 는 실칩 공정 매크로이므로 정의하지 않음
 
@@ -26,16 +176,15 @@
 **→ Coral NPU 코어는 ZCU102에 충분히 수용 가능.**
 
 [리스크 해소]
-- 사전 우려: coralnpu_soc.core의 합성 타깃이 xcvu13p (약 3,780K LC)로,
-  ZCU102(ZU9EG, 약 600K LC)의 6배 규모 → 수용 불가 예상
+- 사전 우려: 합성 타깃이 xcvu13p(약 3,780K LC)로 ZCU102의 6배 → 수용 불가 예상
 - 실제 결과: **기우였음.** 해당 타깃은 SoC 전체(UART/I2C/ISP/ROM/버스 포함) 기준이었고,
   NPU 코어(CoreMiniAxi)만 분리하면 LUT 18% 수준
-- 결론: **SoC가 아닌 CoreMiniAxi 단독 분리 전략이 유효함이 정량적으로 입증됨**
+- 결론: **CoreMiniAxi 단독 분리 전략의 유효성이 정량적으로 입증됨**
 
 [Bonded IOB 873.78% — 문제 아님]
 - 원인: CoreMiniAxi를 최상위로 단독 합성하여 AXI 신호 2,866개가
   모두 외부 물리 핀(IOB)으로 매핑됨. ZCU102 IOB는 328개
-- M4에서 PS(ARM)와 AXI로 내부 연결하면 해당 신호는 칩 내부 배선이 되어 IOB를 소비하지 않음
+- M4에서 PS(ARM)와 AXI로 내부 연결하면 칩 내부 배선이 되어 IOB를 소비하지 않음
 - 별도 조치 불필요
 
 [관찰 / 후속 분석 대상]
@@ -45,10 +194,10 @@
 - LUT6 25,975개로 연산 로직이 LUT에 집중
 
 [포트 구조 확인 — M4 설계 근거]
-- io_aclk / io_aresetn : 단일 클럭, 단일 리셋 (설계 단순)
-- io_axi_slave_*  : addr 32b / data **128b** → PS M_AXI_HPM → Coral 제어
-- io_axi_master_* : addr 32b / data **128b** → Coral → PS S_AXI_HP (메모리 접근)
-- 표준 AXI4 5채널 구조 그대로 → ZCU102 HP 포트(128b)와 폭 일치, 변환 로직 불필요
+- `io_aclk` / `io_aresetn` : 단일 클럭, 단일 리셋 (설계 단순)
+- `io_axi_slave_*`  : addr 32b / data **128b** → PS M_AXI_HPM → Coral 제어
+- `io_axi_master_*` : addr 32b / data **128b** → Coral → PS S_AXI_HP (메모리 접근)
+- 표준 AXI4 5채널 구조 → ZCU102 HP 포트(128b)와 폭 일치, 변환 로직 불필요
 
 [다음 — M4]
 1. Vivado Block Design 생성 (Zynq UltraScale+ PS + CoreMiniAxi)
