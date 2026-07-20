@@ -1,59 +1,59 @@
-### 2026-07-20 (월) — Coral NPU 전환 및 시뮬레이션 실행 성공 ✅
+### 2026-07-20 (월) — M3 달성: Coral NPU ZCU102 합성 성공 ✅
 
-[방향 전환]
-- 교수님 지시로 대상 NPU를 NVDLA → **Google Coral NPU** 로 변경
-- 목표: ZCU102에서 input → 추론 → output (베어메탈)
-- 선배 확인: 리눅스 서버 불필요, 윈도우 Vivado 2026.1로 진행
+[합성 조건]
+- 도구: Vivado 2026.1 (Windows)
+- 타깃: xczu9eg-ffvb1156-2-e (ZCU102 Evaluation Board)
+- Top module: **CoreMiniAxi**
+- 소스: CoreMiniAxi.sv 단일 파일 (36,725줄 / 1.6MB)
+  · Chisel → Verilog 생성물 (Bazel `emit_verilog`)
+  · ClockGate, RstSync, Sram 모듈이 모두 내장되어 있어 추가 파일 불필요
+- Verilog define: **`SYNTHESIS`**
+  · 이 define이 SRAM 구현 분기를 결정함
+  · 정의 시 → 합성 가능한 동작 기술 메모리 (`bit [127:0] mem[...]`) → BRAM 추론
+  · 미정의 시 → DPI-C 기반 시뮬 전용 메모리 (합성 불가)
+  · USE_TSMC12FFC / USE_GF12LPP / USE_GF22 는 실칩 공정 매크로이므로 정의하지 않음
 
-[Coral 레포 조사]
-- fpga/README.md → **Google 사내 보드("Nexus") 전용 문서**
-  · nexusXX.mtv.corp.google.com 접속, nexus_loader / zturn 등 비공개 사내 도구
-  · ZCU102 포함 공개 보드 지원 없음 → AXI 연결·XDC 직접 작성 필요
-- hdl/verilog/ 에는 Sram.v, ClockGate.sv, RstSync.sv 등 부품 셀만 존재
-  · NPU 본체는 hdl/chisel (Scala) → Bazel로 Verilog 생성 단계 필요
-- fpga/coralnpu_soc.core 분석
-  · vivado 합성 타깃 존재, FPGA_XILINX / USE_GENERIC 파라미터 있음 (긍정)
-  · part = "xcvu13p-fhga2104-2-e" (Virtex UltraScale+, 약 3,780K LC)
-  · ZCU102(ZU9EG)는 약 600K → **6배 이상 작음.** SoC 전체 합성 불가 예상
-  · 대응: NPU 코어만 분리 합성 → 축소 범위 자체를 분석 결과로 삼음
+[리소스 사용량 — 핵심 결과]
 
-[환경 구축 — 완료]
-- WSL2 + Ubuntu 22.04 (윈도우 유지, 듀얼부팅 아님)
-  · 초기 OOBE 멈춤 → wsl --unregister 후 재설치로 해결
-- build-essential / git / python3(3.10) / srecord / curl / zip / unzip
-- bazelisk → /usr/local/bin/bazel
-- coralnpu clone (리눅스 홈 ~/coralnpu. 윈도우 경로는 빌드 속도 문제로 회피)
-- .bazelversion = 8.6.0 (README의 7.4.1과 상이하나 bazelisk가 자동 처리)
+| 자원        | 사용    | 가용     | 비율   |
+|-------------|---------|----------|--------|
+| CLB LUT     | ~49,300 | 274,080  | ~18%   |
+| Register    | ~8,930  | 548,160  | ~1.6%  |
+| Block RAM   | 10      | 912      | 1.10%  |
+| DSP48E2     | 6       | 2,520    | 0.24%  |
+| BUFGCE      | 3       | 116      | 2.59%  |
 
-[빌드 & 실행 — 성공]
-1. 예제 빌드 (222s)
-   bazel build //examples:coralnpu_v2_hello_world_add_floats
-   → .elf / .bin / .vmem 생성
+**→ Coral NPU 코어는 ZCU102에 충분히 수용 가능.**
 
-2. 시뮬레이터 빌드 (368s)
-   bazel build //tests/verilator_sim:core_mini_axi_sim
-   → 로그에 `core_mini_axi_cc_library_emit_verilog` 확인
-   → **Chisel → Verilog 변환이 실제로 수행됨**
-   → Verilator: 124 modules, 1.592 MB sources (M3 합성 재료 확보)
+[리스크 해소]
+- 사전 우려: coralnpu_soc.core의 합성 타깃이 xcvu13p (약 3,780K LC)로,
+  ZCU102(ZU9EG, 약 600K LC)의 6배 규모 → 수용 불가 예상
+- 실제 결과: **기우였음.** 해당 타깃은 SoC 전체(UART/I2C/ISP/ROM/버스 포함) 기준이었고,
+  NPU 코어(CoreMiniAxi)만 분리하면 LUT 18% 수준
+- 결론: **SoC가 아닌 CoreMiniAxi 단독 분리 전략이 유효함이 정량적으로 입증됨**
 
-3. 시뮬레이션 실행 성공
-   → "Simulation stopped by user" 정상 종료 (core dump 없음)
-   → **Coral NPU RTL이 로컬에서 RISC-V 바이너리를 실제 실행함**
+[Bonded IOB 873.78% — 문제 아님]
+- 원인: CoreMiniAxi를 최상위로 단독 합성하여 AXI 신호 2,866개가
+  모두 외부 물리 핀(IOB)으로 매핑됨. ZCU102 IOB는 328개
+- M4에서 PS(ARM)와 AXI로 내부 연결하면 해당 신호는 칩 내부 배선이 되어 IOB를 소비하지 않음
+- 별도 조치 불필요
 
-[삽질 기록 — 경로 문제]
-- examples(RISC-V)와 verilator_sim(x86)이 서로 다른 빌드 설정
-  → 하나를 빌드하면 bazel-bin 심볼릭 링크가 그쪽으로 이동,
-    다른 하나가 "No such file or directory" 로 사라짐
-- 출력 경로가 서로 다름:
-  · 시뮬레이터: bazel-out/k8-fastbuild/
-  · ELF:        bazel-out/k8-fastbuild-ST-dd8dc713f32d/
-- 해결: 양쪽 모두 **절대 경로**로 지정하여 실행. 환경변수 $SIM / $ELF 로 등록
+[관찰 / 후속 분석 대상]
+- DSP를 6개만 사용 → 매트릭스 연산이 DSP48E2가 아닌 LUT로 구현된 것으로 보임
+  · USE_GENERIC 경로의 영향 가능성. M6 분석 항목으로 기록
+- BRAM 10개 ≈ ITCM 8KB + DTCM 32KB (사양과 일치)
+- LUT6 25,975개로 연산 로직이 LUT에 집중
 
-[결과]
-- ✅ M1 완료 (빌드 환경 구축 + 예제 빌드)
-- ✅ M2 진입 (시뮬레이터에서 Coral 실행)
+[포트 구조 확인 — M4 설계 근거]
+- io_aclk / io_aresetn : 단일 클럭, 단일 리셋 (설계 단순)
+- io_axi_slave_*  : addr 32b / data **128b** → PS M_AXI_HPM → Coral 제어
+- io_axi_master_* : addr 32b / data **128b** → Coral → PS S_AXI_HP (메모리 접근)
+- 표준 AXI4 5채널 구조 그대로 → ZCU102 HP 포트(128b)와 폭 일치, 변환 로직 불필요
 
-[다음]
-- M2: 사이클 카운터(mcycle) 측정, 다른 예제 실행
-- M3: 생성된 Verilog 확보 → NPU 코어 분리 → ZCU102 타깃 Vivado 합성
-      → 리소스 리포트로 실제 크기 확인
+[다음 — M4]
+1. Vivado Block Design 생성 (Zynq UltraScale+ PS + CoreMiniAxi)
+2. PS M_AXI_HPM0 → Coral slave 연결
+3. Coral master → PS S_AXI_HP0 연결
+4. Implementation → bitstream 생성
+5. Vitis 베어메탈 앱: input 주입 → output 확인 (UART)
+6. BOOT.bin 생성 (NVDLA 단계에서 습득한 bootgen 활용)
