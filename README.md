@@ -95,8 +95,7 @@ hdl/chisel (Scala)
 | M1 | WSL2 + Bazel 환경 구축, 예제 빌드 | 07-22 | ✅ |
 | M2 | Verilator 시뮬에서 Coral 실행 + 사이클 측정 | 07-29 | ✅ |
 | M3 | Coral RTL → ZCU102 타깃 합성 (bitstream) | 08-05 | ✅ |
-| M4 | BOOT.bin 생성 → 보드 부팅 + Coral 인식 | 08-12 | 🚧 |
-| M5 | **input → 추론 → output 동작** | 08-19 | ⬜ |
+| M4 | Block Design + AXI 연결 + 비트스트림 | 08-12 | 🚧 (비트스트림 완료, XSA/부팅 남음) || M5 | **input → 추론 → output 동작** | 08-19 | ⬜ |
 | M6 | 성능·리소스 측정 및 한계 분석 | 08-26 | ⬜ |
 | 🎯 | 최종 데모 · 보고 | 08-31 | ⬜ |
 

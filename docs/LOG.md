@@ -206,3 +206,55 @@
 4. Implementation → bitstream 생성
 5. Vitis 베어메탈 앱: input 주입 → output 확인 (UART)
 6. BOOT.bin 생성 (NVDLA 단계에서 습득한 bootgen 활용)
+
+
+### 2026-07-21 (화) — M4: Block Design + 비트스트림 생성 성공 ✅
+
+[목표] ZCU102 PS(ARM)와 Coral NPU를 AXI로 연결 → 비트스트림 생성
+
+[AXI 이름 불일치 문제와 해결]
+- Coral(CoreMiniAxi)의 포트가 Chisel식 이름(io_axi_slave_write_addr_ready 등)이라
+  Vivado가 AXI 인터페이스로 자동 인식하지 못함
+- IP 패키징의 Auto Infer Interface도 실패 ("No interface was inferred")
+- **해결: coral_axi_wrapper.sv 작성**
+  · io_axi_slave_* → s_axi_* , io_axi_master_* → m_axi_* 로 표준 이름 변환
+  · 미사용 포트(io_debug_*, io_dm_*, io_wfi 등)는 open/상수 고정
+  · io_boot_addr, io_irq만 외부 노출
+  · Open Elaborated Design으로 문법·연결 검증 통과
+  → wrapper 적용 후 Vivado가 s_axi / m_axi 를 AXI로 자동 인식 (핵심 돌파)
+
+[Block Design 구성]
+- Zynq UltraScale+ MPSoC (PS) + coral_axi_wrapper + AXI SmartConnect ×2 + Proc Reset
+- 연결:
+  · PS M_AXI_HPM → SmartConnect → wrapper s_axi  (PS가 Coral 제어)
+  · wrapper m_axi → SmartConnect → PS S_AXI_HP0   (Coral이 메모리 접근)
+  · 클럭/리셋 자동 연결 (Run Connection Automation)
+  · irq/boot_addr는 Constant(0)로 고정
+- irq 자동 인터럽트 연결은 실패하여 제외 (Connection Automation에서 체크 해제)
+
+[삽질 기록]
+- Add Module로 wrapper 추가 시 "Module references are still updating" 반복
+  → Tcl로 우회: create_bd_cell -type module -reference coral_axi_wrapper ...
+- 첫 Generate Bitstream에서 IO Placement 실패
+  → "870 I/O ports > 707 available" 에러
+  → 원인: Top이 coral_axi_wrapper(내부)로 잡혀 AXI 신호가 물리 핀으로 노출됨
+  → 해결: Top을 coralnpu_wrapper(Block Design 전체 래퍼)로 변경
+     → AXI가 PS와 내부 연결되어 물리 핀 미사용, 정상 진행
+
+[결과]
+- Validate Design: 에러/critical warning 없음 통과
+- Synthesis → Implementation → **write_bitstream Complete** ✅
+- 비트스트림 생성 성공 (coralnpu_wrapper.bit)
+
+[남은 경고 — 내일 처리]
+- ⚠️ Timing 미충족 (Timing 38-282)
+  → Coral 클럭이 높아 타이밍 위반. M5 보드 테스트에서 문제 시 클럭 하향(예: 100→50MHz)
+- ⚠️ Export Hardware에서 "Failed to write hardware handoff data" critical warning
+  → XSA에 PS handoff 데이터 누락. Vitis 진행 전 해결 필요
+  → 대응 예정: Generate Block Design 재실행 → 저장 → Export Hardware 재시도
+
+[다음 — M5]
+1. XSA 정상 내보내기 (handoff 경고 해결)
+2. Vitis 실행 → 베어메탈 앱
+3. Coral에 input 주입 → output 확인 (UART)
+4. Timing 문제 시 클럭 조정
