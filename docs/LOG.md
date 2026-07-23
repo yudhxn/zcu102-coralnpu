@@ -258,3 +258,52 @@
 2. Vitis 실행 → 베어메탈 앱
 3. Coral에 input 주입 → output 확인 (UART)
 4. Timing 문제 시 클럭 조정
+
+### 2026-07-23 (목) — M4 마무리 + M5 착수: XSA·Vitis·보드 동작·PS↔NPU AXI 링크 검증 ✅
+
+[목표] 어제 남긴 타이밍 위반 해결 → XSA 내보내기 → Vitis 베어메탈 → 보드에서 PS↔Coral AXI 통신 확인
+
+[타이밍 위반 해결 — 클럭 하향]
+- 어제 남긴 Timing 미충족(WNS -2.385, TNS -3363) 처리
+- ZYNQ PS의 PL_CLK0을 100 → 50MHz로 하향 (Clock Configuration → PL Fabric Clocks)
+  · 클럭 주기 10ns → 20ns → 여유 시간 10ns 확보
+- 재합성 → 재구현 후 **WNS +0.462 / TNS 0.000 → 타이밍 통과** ✅
+- 데모 목표(input→output 동작 확인)에는 속도 무관하므로 클럭 하향이 가장 안전
+
+[XSA 내보내기]
+- Export Hardware (Include bitstream) → coralnpu_wrapper.xsa 정상 생성
+- 어제의 "hardware handoff data" critical warning은 XSA 생성에 영향 없음 (무해로 판명)
+- 경로 주의: 한글·공백 없는 경로 권장 (Vitis가 못 읽는 경우 있음)
+
+[Vitis 플랫폼/앱 구성 — Vitis Unified IDE 2026.1]
+- Platform(coral_platform): XSA 기반, OS **standalone**, CPU **psu_cortexa53_0**
+- Application(coral_app): Empty Application → main.c 직접 작성
+- 삽질: main.c를 실수로 platform 쪽에 생성 → 빌드 시 `ninja: no work to do`
+  → coral_app/Sources로 옮겼으나 이번엔 `undefined reference to 'main'`
+  → 빈 main.c가 컴파일된 것이 원인, 코드 다시 넣고 저장하여 해결
+- Build Finished successfully → **coral_app.elf** 생성
+
+[보드 부팅 + UART 확인]
+- SW6 JTAG 모드, USB-UART 연결, PuTTY 115200 8N1 (COM6, Silicon Labs)
+- 삽질: Vitis 내장 시리얼 터미널 "Access denied" (포트 점유) → PuTTY로 우회
+- Hello World 앱 정상 출력 → **PS 베어메탈 실행 경로 검증** ✅
+
+[PS↔Coral AXI 링크 검증 — 핵심 돌파]
+- Vivado Address Editor 확인: coral s_axi(reg0) = 0x5_0000_0000, range 4G
+- A53에서 Coral 내부 메모리 read/write 테스트 (Xil_Out32/Xil_In32)
+  · ITCM(0x5_0000_0000), DTCM(0x5_0001_0000) 각 4워드 write → read
+  · **전부 일치 (PASS)** → PS↔NPU AXI 배선 정상 입증 ✅
+- Xil_Out32/Xil_In32는 64-bit 주소(UINTPTR) 그대로 사용 가능 (default MMU가 PL 영역 매핑)
+
+[CoreMiniAxi 제어 규약 파악 — 레퍼런스 드라이버 분석]
+- google-coral/coralnpu `core_mini_axi_tb` 분석으로 확보:
+  · s_axi 창 내부 맵: **ITCM +0x0, DTCM +0x10000, CSR +0x30000**
+  · CSR+0x0 = reset/clock 제어, CSR+0x4 = entry PC, CSR+0x8 = 상태
+  · 실행 순서: 프로그램 적재 → CSR+0x4에 entry → ClockGate(false)=0x1 → Reset(false)=0x0 → 실행
+  · 완료 감지: CSR+0x8 상태 레지스터 또는 DTCM done 플래그 폴링
+
+[다음 — M5 완성]
+1. NPU 실행 로더: 작은 RISC-V 프로그램(기계어 하드코딩)을 ITCM에 적재
+   · DTCM에서 input 읽어 계산 → output + done을 DTCM에 기록
+2. A53에서 done 플래그 폴링 → output 읽어 UART 출력 (진짜 input→추론→output)
+3. 완성 앱으로 BOOT.bin 생성 → SD 부팅 (컴퓨터 없이 데모)
