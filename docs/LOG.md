@@ -393,3 +393,25 @@
 [보드] XOR(0,0)=0, (0,1)=1, (1,0)=1, (1,1)=0 전부 정확 → NPU가 2층 신경망 추론 수행.
 [코드] 03_sw/main_xor.c
 [다음] 더 큰 모델(3~4층, 다중 분류) 또는 C→rv32im 컴파일로 확장.
+
+### 2026-07-27 (월) — C→RISC-V 컴파일 파이프라인 구축 + 3층 MLP 준비
+[의미] 손 어셈블 한계를 넘어, NPU 프로그램을 C로 작성해 컴파일하는 경로 확보. 모델 크기 제약이 사라짐.
+
+[툴체인]
+- sudo 불가 환경이라 .deb를 받아 홈에 풀어서 사용
+  · gcc-riscv64-unknown-elf 10.2.0 + binutils-riscv64-unknown-elf 2.35.1
+- 함정 1: gcc가 시스템 x86 as를 호출 → `invalid -march=rv32im`
+  → 해결: `-S`로 어셈블리만 생성하고 riscv as로 직접 어셈블
+- 함정 2: ld 기본이 64비트 → `-m elf32lriscv` 명시 필요
+- 함정 3: .bss가 DTCM 0x10000에 잡혀 입력 데이터와 충돌
+  → 링커 스크립트에서 스크래치 영역(0x14000)으로 분리
+
+[빌드 흐름] (03_sw/npu_src/build.sh)
+  gcc -march=rv32im -S → as → ld(-T link.ld, -m elf32lriscv) → objcopy(.text) → 기계어 워드
+
+[모델] 3층 MLP 4→8→8→3, ReLU, argmax까지 C로 작성
+- text 328바이트(ITCM 8KB 여유), mul 3개 사용
+- unicorn 에뮬레이터 4케이스 전부 기대값 일치 (PASS)
+
+[코드] 03_sw/main_mlp.c (로더+가중치), 03_sw/npu_src/{mlp.c, link.ld, build.sh}
+[다음] 보드에서 3층 MLP 실행 검증 → 이후 더 큰 모델/실제 학습 가중치로 확장
