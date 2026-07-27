@@ -105,8 +105,8 @@ hdl/chisel (Scala) ─Bazel(WSL2)→ Verilog ─Vivado 2026.1→ bitstream ─bo
 
 ## 알려진 리스크 / 한계 (요약)
 
-1. **HW 곱셈(M-확장) 미동작** — 현재 축소 합성 구성에서 `mul` 실행 시 코어 정지.
-   곱셈을 shift+add SW로 우회(16 MAC에 ~541 명령어). 곱셈 처리량 제약.
+1. **곱셈기 구현 특성** — 기능은 정상(`mul` 동작 실측 확인)이나, 곱셈이 DSP48E2가
+   아닌 LUT 로직으로 구현됨(DSP 6개만 사용) → 면적·속도 효율 개선 여지.
 2. **타깃 칩 규모 차이** — Coral 기본 타깃 xcvu13p(~3,780K 셀) 대비 ZU9EG는 ~6배 작음.
    → NPU 코어(CoreMiniAxi)만 분리 합성(LUT 18%).
 3. **클럭 상한 50MHz** — 100MHz 타이밍 위반 → 50MHz 하향으로 안정 동작.
