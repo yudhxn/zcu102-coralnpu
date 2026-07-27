@@ -307,3 +307,42 @@
    · DTCM에서 input 읽어 계산 → output + done을 DTCM에 기록
 2. A53에서 done 플래그 폴링 → output 읽어 UART 출력 (진짜 input→추론→output)
 3. 완성 앱으로 BOOT.bin 생성 → SD 부팅 (컴퓨터 없이 데모)
+
+
+### 2026-07-27 (월) — M5 완성: Coral NPU 실제 실행 + BOOT.bin SD 부팅 성공 🎯✅
+
+[목표] NPU에 프로그램을 적재·실행해 input→추론→output 확인 → BOOT.bin으로 독립 부팅
+
+[NPU 실행 프로그램 — 기계어 하드코딩]
+- 툴체인(WSL/Bazel) 없이, 작은 RISC-V 프로그램을 기계어(8워드)로 직접 작성해 ITCM에 적재
+  · lui/lw/slli/add/sw/addi/sw/j → output = input*3, done=1 후 무한루프
+  · Python으로 각 명령어 인코딩 디코드 검증 후 사용
+- 데이터 규약(DTCM): input +0x0, output +0x4, done +0x8
+
+[로더 (A53 베어메탈)]
+- 절차: 리셋 유지(CSR+0x0=1) → ITCM에 프로그램 write → DTCM에 input write, done=0
+  → CSR+0x4=0(entry) → 실행(CSR+0x0: 0x1 → 0x0) → DTCM done 폴링 → output 읽기
+- CSR+0x8(status)는 0으로 관찰됨 (코어가 계산 후 무한루프 상태라 정상)
+  → 완료 감지는 DTCM done 플래그 폴링으로 처리 (status 비의존)
+
+[JTAG 실행 결과]
+- input 7/10/100/1234 → output 21/30/300/3702 전부 OK
+- **Coral NPU(RISC-V 코어)가 명령어를 실제 실행해 계산 → M5 핵심 달성** ✅
+
+[BOOT.bin 생성 + SD 부팅]
+- Vitis Create Boot Image: fsbl.elf + coralnpu_wrapper.bit + coral_app.elf → BOOT.bin (약 26MB)
+  · PMU 펌웨어는 미포함 (없어도 앱 정상 동작 확인, "PMU-FW not running" 경고는 무해)
+- SD카드(FAT32) 루트에 BOOT.bin 복사, 옛 image.ub 삭제
+- 부팅 모드 SW6: 1-ON / 2·3·4-OFF (SD)
+- 전원 ON → FSBL → 비트스트림 로딩 → coral_app 자동 실행
+- **컴퓨터·Vitis·JTAG 없이 보드 전원만으로 NPU 동작 확인** → 데모 완성본 확보 🎯
+
+[확보한 핵심 정보 — 재사용용]
+- s_axi 창 맵: ITCM 0x5_0000_0000 / DTCM 0x5_0001_0000 / CSR 0x5_0003_0000
+- CSR: +0x0 reset·clock, +0x4 entry PC, +0x8 status
+- 클럭 50MHz (WNS +0.462)
+
+[다음 — 확장 (선택)]
+1. NPU 데모 업그레이드: scalar(x3) → vector(SIMD)/행렬 연산으로 Coral 강점 시연
+2. M6: 실행 사이클 수 · LUT/DSP/BRAM 사용량 측정 및 한계 분석
+3. (선택) PMU 펌웨어 포함해 부팅 경고 제거
