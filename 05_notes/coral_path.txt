@@ -1,0 +1,9 @@
+export SIM=/home/ehdgns/.cache/bazel/_bazel_ehdgns/82892f0810008443cbc7cdf5b5528ac4/execroot/coralnpu_hw/bazel-out/k8-fastbuild/bin/tests/verilator_sim/core_mini_axi_sim
+export ELF=/home/ehdgns/.cache/bazel/_bazel_ehdgns/82892f0810008443cbc7cdf5b5528ac4/execroot/coralnpu_hw/bazel-out/k8-fastbuild-ST-dd8dc713f32d/bin/examples/coralnpu_v2_hello_world_add_floats.elf
+export RTL=/home/ehdgns/.cache/bazel/_bazel_ehdgns/82892f0810008443cbc7cdf5b5528ac4/execroot/coralnpu_hw/bazel-out/k8-fastbuild/bin/hdl/chisel/src/coralnpu
+
+
+
+# 경로가 바뀌면 다시 찾는 법
+find ~/.cache/bazel -name "core_mini_axi_sim" -type f
+find ~/.cache/bazel -name "CoreMiniAxi.sv"
