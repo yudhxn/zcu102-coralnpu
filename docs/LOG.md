@@ -439,3 +439,9 @@
 
 [코드] 03_sw/main_mnist.c (로더+가중치), 03_sw/npu_src/{mnist.c, train.py, quant.py}
 [다음] BOOT.bin 갱신(SD 데모), 성능 측정 보강, 발표자료에 MNIST 결과 반영
+
+### 2026-07-28 (화) — MNIST BOOT.bin SD 독립 부팅 성공 ✅
+[내용] MNIST 버전 앱으로 BOOT.bin 재생성(fsbl + bitstream + coral_app.elf, 약 26.7MB) → SD 부팅 확인.
+[삽질] SD 작업 중 보드 전원/USB 재연결로 COM 포트가 사라져 PuTTY 접속 실패 → USB 재연결 및 전원 ON 후 정상 인식.
+[검증] BOOT.bin 내부에 FSBL(Jul 28 빌드)과 앱 문자열("MNIST handwritten digit recognition on Coral NPU") 포함 확인.
+[결과] 컴퓨터·JTAG 없이 SD 부팅만으로 손글씨 인식 데모 자동 실행 → 최종 데모 완성.
