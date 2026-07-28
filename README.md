@@ -103,6 +103,8 @@ hdl/chisel (Scala) ─Bazel(WSL2)→ Verilog ─Vivado 2026.1→ bitstream ─bo
   · float32 98.00% → **int8 98.00%** (정확도 손실 0), 가중치 9,640B → **2,368B (4배 절감)**
   · NPU 프로그램은 C로 작성해 riscv gcc(rv32im)로 빌드 (손 어셈블 아님)
   · 보드에서 0~9 손글씨 **10/10 정확 인식**, 추론 1회 17,230 명령어(50MHz 기준 ~345µs)
+- **CNN 실행**: Conv(8ch 3×3)+ReLU+MaxPool+FC 구조도 NPU에서 동작 (int8 96.89%, 10/10 정확).
+  · 파라미터 810개(FC의 1/3)·가중치 864B이나 연산량은 약 2배 — 메모리/연산 트레이드오프 실측
 - 상세 측정·한계는 `05_results/M6_analysis.md`, 발표 자료는 `docs/Coral_NPU_ZCU102.pptx` 참고.
 
 ---
