@@ -99,6 +99,10 @@ hdl/chisel (Scala) ─Bazel(WSL2)→ Verilog ─Vivado 2026.1→ bitstream ─bo
 - **신경망 추론**: **Y = ReLU(W·X + b)** 완전연결층 1개를 NPU가 계산.
   예) X=[3,1,2,5] → Y=[16,0,10,113] (기대값 일치, ReLU 동작 확인).
 - **SD 독립 부팅**: 컴퓨터·JTAG 없이 BOOT.bin(SD)만으로 자동 실행.
+- **MNIST 손글씨 인식** (최종 데모): 학습된 MLP(64-32-10)를 **int8 양자화**해 NPU에서 추론.
+  · float32 98.00% → **int8 98.00%** (정확도 손실 0), 가중치 9,640B → **2,368B (4배 절감)**
+  · NPU 프로그램은 C로 작성해 riscv gcc(rv32im)로 빌드 (손 어셈블 아님)
+  · 보드에서 0~9 손글씨 **10/10 정확 인식**, 추론 1회 17,230 명령어(50MHz 기준 ~345µs)
 - 상세 측정·한계는 `05_results/M6_analysis.md`, 발표 자료는 `docs/Coral_NPU_ZCU102.pptx` 참고.
 
 ---
