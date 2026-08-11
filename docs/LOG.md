@@ -4,7 +4,7 @@
 
 
 
-### 2026-07-15 (수) 밤 — Coral NPU로 방향 전환
+### 2026-07-15 (수)  — Coral NPU로 방향 전환
 
 - **대상 NPU 변경: NVDLA → Google Coral NPU**
 - 목표: ZCU102에 Coral을 올려 input → 추론 → output 동작
