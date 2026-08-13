@@ -40,3 +40,13 @@ outdir/
 __pycache__/
 .venv/
 .DS_Store
+
+# ── 임시/중복 ─────────────────────────────────
+*.tmp*
+09_remote/sd/
+09_remote/sd_linux/
+09_remote/sd_full/
+09_remote/boot/
+09_remote/fsbl/
+09_remote/bit/
+01_hw/test.txt

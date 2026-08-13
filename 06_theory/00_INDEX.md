@@ -1,7 +1,7 @@
 # 이론 공부 — 목차
 
 ZCU102 + Coral NPU 프로젝트 이론 파트.
-기준일: 2026-07-20 / 근거: 저장소 `yudhxn/zcu102-nvdla` (README.md, docs/LOG.md)
+기준일: 2026-07-20 / 근거: 저장소 `yudhxn/zcu102-coralnpu` (README.md, docs/LOG.md)
 
 ---
 

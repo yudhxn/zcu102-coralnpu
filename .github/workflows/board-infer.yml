@@ -1,0 +1,53 @@
+# 실제 ZCU102 보드에서 NPU 추론을 돌리는 CI
+#
+# 구조: GitHub → self-hosted 러너(연구실 Windows PC, 항상 켜짐)
+#              → plink(SSH)로 보드에 명령 → 실제 Coral NPU 추론 → 결과 검증
+#
+# 사전 준비 (ci/RUNNER_SETUP.md 참고):
+#   1) 연구실 PC에 self-hosted 러너 설치 (labels: zcu102-host)
+#   2) 리포 Settings → Secrets → Actions:
+#        BOARD_IP = 보드 IP,  BOARD_PW = root 비밀번호(기본 root)
+#   3) PC에서 한 번 수동으로 plink 접속해 호스트키 캐시
+#   4) 보드 SD의 FAT 파티션에 09_remote/board/ 폴더 복사돼 있어야 함
+
+name: NPU inference on real ZCU102
+
+on:
+  push:
+    branches: [main]
+    paths: ['09_remote/**', '03_sw/**', '.github/workflows/board-infer.yml']
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: '8 = 검증된 8x8 데모 / 28 = 28x28 데모 / full = 10,000장 전수'
+        default: '28'
+
+jobs:
+  infer-on-board:
+    runs-on: [self-hosted, zcu102-host]
+    timeout-minutes: 30
+    steps:
+      - name: 보드 연결 확인
+        shell: cmd
+        run: plink -batch -pw ${{ secrets.BOARD_PW }} root@${{ secrets.BOARD_IP }} "uname -a && ls /run/media/mmcblk0p1/board || ls /media/*/board"
+
+      - name: NPU 추론 실행
+        shell: cmd
+        run: plink -batch -pw ${{ secrets.BOARD_PW }} root@${{ secrets.BOARD_IP }} "sh /run/media/mmcblk0p1/board/run_demo.sh ${{ github.event.inputs.mode || '28' }}" > result.txt 2>&1 & type result.txt
+
+      - name: 결과 검증
+        shell: pwsh
+        run: |
+          $r = Get-Content result.txt -Raw
+          Write-Host $r
+          if ($r -match "10 / 10 correct" -or $r -match "완전 일치 — PASS") {
+            Write-Host "== 보드 추론 검증 통과 =="
+          } else {
+            throw "보드 추론 결과가 기대와 다름"
+          }
+
+      - name: 로그 보관
+        uses: actions/upload-artifact@v4
+        with:
+          name: board-uart-log-${{ github.run_number }}
+          path: result.txt
