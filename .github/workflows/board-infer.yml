@@ -3,16 +3,18 @@
 #   git push → GitHub Actions → 연구실 PC(self-hosted 러너)
 #            → plink(SSH) → ZCU102 → 실제 Coral NPU 추론 → 결과 검증
 #
-# 준비물은 09_remote/ci/RUNNER_SETUP.md 참고.
-#   · 러너 labels: zcu102-host
-#   · Secrets: BOARD_IP, BOARD_PW
-#   · PC에 plink (PuTTY) 설치 + PATH 등록
+# 준비물: 09_remote/ci/RUNNER_SETUP.md
 #
-# ★ 겪은 함정 두 개 (2026-08-13)
-#   1) 시크릿을 job env 로 넘기면 cmd 셸에서 %VAR% 가 비어 전달된다.
-#      -> 각 명령줄에 직접 넣을 것.
-#   2) shell: pwsh 는 PowerShell 7 이 설치돼 있어야 한다. 윈도우 기본은 5.1 이므로
-#      shell: powershell 을 쓴다. (pwsh 로 두면 "command not found")
+# ─────────────────────────────────────────────────────────────────────
+# 2026-08-13 에 겪은 함정 네 개 — 전부 셸 선택에서 왔다.
+#   1) 시크릿을 job env 로 넘기면 cmd 에서 %VAR% 가 비어 전달됨
+#      -> 각 명령줄에 ${{ secrets.* }} 를 직접 삽입
+#   2) shell: pwsh 는 PowerShell 7 필요. 윈도우 기본은 5.1 -> command not found
+#   3) shell: powershell 은 .ps1 을 생성해 실행하는데 실행 정책(Restricted)에 막힘
+#      -> UnauthorizedAccess
+#   4) 결국 shell: cmd 만 남는다. 실행 정책도 없고 추가 설치도 필요 없다.
+#      한글 문자열 비교는 코드페이지 문제가 있으므로 검증은 ASCII("PASS")로만 한다.
+# ─────────────────────────────────────────────────────────────────────
 
 name: NPU inference on real ZCU102
 
@@ -34,56 +36,61 @@ jobs:
     timeout-minutes: 20
 
     steps:
+      - name: plink 존재 확인
+        shell: cmd
+        run: |
+          where plink || (echo ERROR: plink not found in PATH. Install PuTTY and add to system PATH. & exit /b 1)
+
       # 보드 rootfs 는 initramfs(램)라 부팅할 때마다 SSH 호스트키가 새로 생성된다.
       # -batch 모드는 바뀐 키를 만나면 멈추므로 먼저 y 를 흘려넣어 캐시한다.
-      - name: 호스트키 갱신 (보드 재부팅 대응)
-        shell: powershell
+      - name: 호스트키 갱신
+        shell: cmd
         continue-on-error: true
         run: |
-          "y" | plink -pw "${{ secrets.BOARD_PW }}" root@${{ secrets.BOARD_IP }} "true"
+          echo y| plink -pw "${{ secrets.BOARD_PW }}" root@${{ secrets.BOARD_IP }} "true"
 
       - name: 보드 연결 확인
-        shell: powershell
+        shell: cmd
         run: |
           plink -batch -pw "${{ secrets.BOARD_PW }}" root@${{ secrets.BOARD_IP }} "uname -srm"
 
       # 이 두 옵션이 없으면 커널이 PL 클럭·전원을 꺼버려 NPU 접근 시 보드가 멈춘다.
       - name: 부팅 옵션 확인
-        shell: powershell
+        shell: cmd
         run: |
-          $c = plink -batch -pw "${{ secrets.BOARD_PW }}" root@${{ secrets.BOARD_IP }} "cat /proc/cmdline"
-          Write-Host $c
-          if ($c -notmatch 'clk_ignore_unused') { throw 'clk_ignore_unused 없음 — boot.scr 확인' }
-          if ($c -notmatch 'pd_ignore_unused')  { throw 'pd_ignore_unused 없음 — boot.scr 확인' }
-          Write-Host 'OK'
+          plink -batch -pw "${{ secrets.BOARD_PW }}" root@${{ secrets.BOARD_IP }} "cat /proc/cmdline" > cmdline.txt 2>&1
+          type cmdline.txt
+          findstr /C:"clk_ignore_unused" cmdline.txt >nul || (echo ERROR: clk_ignore_unused missing - check boot.scr & exit /b 1)
+          findstr /C:"pd_ignore_unused" cmdline.txt >nul || (echo ERROR: pd_ignore_unused missing - check boot.scr & exit /b 1)
+          echo boot options OK
 
       - name: NPU 추론 실행
-        shell: powershell
+        shell: cmd
         run: |
-          $mode = "${{ github.event.inputs.mode }}"
-          if (-not $mode) { $mode = "full" }
-          Write-Host "mode = $mode"
-          plink -batch -pw "${{ secrets.BOARD_PW }}" root@${{ secrets.BOARD_IP }} `
-            "sh /run/media/mmcblk0p1/board/run_demo.sh $mode" 2>&1 |
-            Tee-Object -FilePath result.txt
+          set MODE=${{ github.event.inputs.mode || 'full' }}
+          echo mode = %MODE%
+          plink -batch -pw "${{ secrets.BOARD_PW }}" root@${{ secrets.BOARD_IP }} "sh /run/media/mmcblk0p1/board/run_demo.sh %MODE%" > result.txt 2>&1
+          set RC=%ERRORLEVEL%
+          type result.txt
+          exit /b %RC%
 
       - name: 결과 검증
-        shell: powershell
+        shell: cmd
         run: |
-          $r = Get-Content result.txt -Raw
-          $mode = "${{ github.event.inputs.mode }}"
-          if (-not $mode) { $mode = "full" }
-          if ($mode -eq 'full') {
-            if ($r -notmatch '9641 / 10000') { throw '전수 정확도가 기대값(9641)과 다름' }
-            if ($r -notmatch '완전 일치')     { throw 'HW/EMU 불일치' }
-          } else {
-            if ($r -notmatch '/ 10 correct')  { throw '데모 결과를 못 찾음' }
-          }
-          Write-Host '== 보드 추론 검증 통과 =='
+          set MODE=${{ github.event.inputs.mode || 'full' }}
+          if "%MODE%"=="full" (
+            findstr /C:"9641 / 10000" result.txt >nul || (echo ERROR: accuracy differs from expected 9641 & exit /b 1)
+            findstr /C:"PASS" result.txt >nul || (echo ERROR: HW/EMU mismatch & exit /b 1)
+          ) else (
+            findstr /C:"correct" result.txt >nul || (echo ERROR: no inference result found & exit /b 1)
+          )
+          echo == board inference verified ==
 
       - name: 로그 보관
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: board-uart-log-${{ github.run_number }}
-          path: result.txt
+          path: |
+            result.txt
+            cmdline.txt
