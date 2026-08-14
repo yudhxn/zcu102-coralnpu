@@ -672,3 +672,38 @@ DTCM 32bit / ITCM 32bit / DTCM 128bit 쓰기가 모두 정상이었다.
 
 "완전체를 못 올렸다"가 아니라 "어디까지 되고 왜 거기서 멈추는지 숫자로 밝혔다"
 가 정확한 서술이다.
+
+
+
+## 2026-08-14: SD ext4 전환 완료 ★
+
+initramfs(램) rootfs → SD ext4 rootfs 전환을 **완료**. 재부팅 후 설정 영구 유지 확인.
+
+### 한 작업
+- SD를 두 파티션으로 재구성: p1 FAT32 1GB(BOOT.BIN, image.ub, boot.scr, board/), p2 ext4(rootfs).
+- 카드리더가 다중 슬롯이라 `wsl --mount --bare`가 0x8007000f로 실패 → **usbipd로 우회**
+  (`usbipd bind/attach --wsl --busid 3-1`, 카드리더 VID 05e3:0748).
+- WSL에서 `/dev/sdg2` mkfs.ext4 → 진짜 rootfs.tar.gz(47MB) 풀기.
+- 첫 부팅 시 **emergency mode** (모든 마운트 실패, `mount: must be superuser`).
+- 원인: `id` → **euid=1000**, rootfs 전체가 uid/gid 1000 소유. tarball에 root 소유가 안 담김.
+- 해결: WSL에서 `sudo chown -R 0:0 /mnt/sdroot` → 정상 부팅 → login → passwd → 재부팅 후 유지 확인.
+
+### ★ 새 함정 3-9 — rootfs tarball은 root 소유로 만들어야 한다
+Yocto rootfs는 pseudo 안에서만 root:root 로 보인다. 그냥 `tar`로 묶으면 빌드계정(1000) 소유가
+담겨, SD에 풀면 euid=1000이 되어 mount 전부 실패 → emergency mode.
+**해결책(영구): `make_rootfs.sh`의 tar 명령에 `--owner=0 --group=0` 추가**
+(`tar czf rootfs.tar.gz --numeric-owner --owner=0 --group=0 -C <rootfs> .`).
+그러면 아카이브 내 모든 파일이 root 소유로 강제되어 재발 안 함.
+임시 대응은 푼 뒤 `chown -R 0:0`.
+
+### 현재 상태
+- 보드: SD ext4 부팅 정상, root/root 로그인, 설정 영구 저장.
+- 안전망: `D:\backup_sd_ext4`(SD 굽는 재료 47MB rootfs 포함), PetaLinux 빌드트리(`~/coral_plnx/coral_zcu102`) 정상.
+
+### 다음 순서
+1. (진행) CI 통과 확인 — ext4 전환 후 board 경로 변동 확인. 예전 수동 성공 경로는
+   `/run/media/mmcblk0p1/board/run_demo.sh`. ext4에선 마운트 위치가 바뀔 수 있음(부팅 로그에
+   `/run/media/BOOT-mmcblk0p1` 마운트 실패 흔적 있었음 — 확인 필요).
+2. 러너 `C:\actions-runner`로 이전.
+3. 발표자료(pptx).
+4. (권장) make_rootfs.sh에 `--owner=0 --group=0` 반영해 3-9 재발 방지.
