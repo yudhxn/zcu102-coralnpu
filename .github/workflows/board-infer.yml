@@ -14,6 +14,12 @@
 #      -> UnauthorizedAccess
 #   4) 결국 shell: cmd 만 남는다. 실행 정책도 없고 추가 설치도 필요 없다.
 #      한글 문자열 비교는 코드페이지 문제가 있으므로 검증은 ASCII("PASS")로만 한다.
+#   5) 시크릿 값 끝에 줄바꿈이 들어가면 명령줄이 두 동강 난다 (plink: no valid host name).
+#      GitHub 시크릿은 붙여넣지 말고 직접 타이핑해서 저장할 것.
+#
+# 보드 rootfs 는 initramfs(램)라 부팅할 때마다 SSH 호스트키가 새로 생성된다.
+# echo y | plink 로 수락시키려 했더니 stdin 이 원격 세션으로 넘어가 1분 넘게 멈췄다.
+# -> PuTTY 의 로 -batch 모드에서도 새 키를 자동 저장한다.
 # ─────────────────────────────────────────────────────────────────────
 
 name: NPU inference on real ZCU102
@@ -41,14 +47,6 @@ jobs:
         run: |
           where plink || (echo ERROR: plink not found in PATH. Install PuTTY and add to system PATH. & exit /b 1)
 
-      # 보드 rootfs 는 initramfs(램)라 부팅할 때마다 SSH 호스트키가 새로 생성된다.
-      # -batch 모드는 바뀐 키를 만나면 멈추므로 먼저 y 를 흘려넣어 캐시한다.
-      - name: 호스트키 갱신
-        shell: cmd
-        continue-on-error: true
-        run: |
-          echo y| plink -pw "${{ secrets.BOARD_PW }}" root@${{ secrets.BOARD_IP }} "true"
-
       - name: 보드 연결 확인
         shell: cmd
         run: |
@@ -69,7 +67,7 @@ jobs:
         run: |
           set MODE=${{ github.event.inputs.mode || 'full' }}
           echo mode = %MODE%
-          plink -batch -pw "${{ secrets.BOARD_PW }}" root@${{ secrets.BOARD_IP }} "sh /run/media/mmcblk0p1/board/run_demo.sh %MODE%" > result.txt 2>&1
+          plink -batch -pw "${{ secrets.BOARD_PW }}" root@${{ secrets.BOARD_IP }} "sh /run/media/BOOT-mmcblk0p1/board/run_demo.sh %MODE%" > result.txt 2>&1
           set RC=%ERRORLEVEL%
           type result.txt
           exit /b %RC%
