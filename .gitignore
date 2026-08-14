@@ -50,3 +50,7 @@ __pycache__/
 09_remote/fsbl/
 09_remote/bit/
 01_hw/test.txt
+
+# GitHub Actions self-hosted 러너 (리포 안에 설치됨 — 커밋 대상 아님)
+actions-runner/
+_work/

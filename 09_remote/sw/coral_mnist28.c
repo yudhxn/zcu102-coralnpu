@@ -51,7 +51,15 @@ static int infer(const unsigned char *img784)
     Xil_Out32(PCR, 0x0);
     Xil_Out32(CTRL, 0x1);           /* reset */
     Xil_Out32(CTRL, 0x0);           /* run   */
-    for (int ms = 0; ms < 2000; ms++) {
+    /* ★ 2026-08-13 수정: 예전에는 곧바로 nanosleep(1ms)로 잠들었다.
+     *   그러면 실제 추론 지연이 1ms 미만이어도 1ms 단위로 반올림되고,
+     *   더 나쁘게는 clock()으로 시간을 재면 자는 동안 CPU 시간이 안 쌓여
+     *   "장당 0.05ms" 같은 물리적으로 불가능한 수치가 나온다.
+     *   먼저 충분히 바쁜 대기를 돌아 실제 지연을 측정할 수 있게 한다. */
+    for (long i = 0; i < 20000000L; i++) {
+        if (Xil_In32(DTCM + O_DONE)) return (int)Xil_In32(DTCM + O_PRED);
+    }
+    for (int ms = 0; ms < 2000; ms++) {          /* 그래도 안 끝나면 양보 */
         if (Xil_In32(DTCM + O_DONE)) return (int)Xil_In32(DTCM + O_PRED);
         struct timespec ts = {0, 1000000}; nanosleep(&ts, 0);
     }
@@ -92,14 +100,16 @@ int main(int argc, char **argv)
         FILE *fx = fopen(px, "rb"), *fy = fopen(py, "rb");
         if (!fx || !fy) { fprintf(stderr, "t10k 파일 없음: %s\n", argv[2]); return 2; }
         static unsigned char X[784]; int correct = 0, n = 0; int y;
-        clock_t t0 = clock();
+        /* ★ clock()은 CPU 시간이라 대기 구간이 빠진다. 실제 경과시간을 쓴다. */
+        struct timespec T0, T1; clock_gettime(CLOCK_MONOTONIC, &T0);
         while (fread(X, 1, 784, fx) == 784 && (y = fgetc(fy)) != EOF) {
             int p = infer(X);
             if (p == y) correct++;
             n++;
             if (n % 1000 == 0) { printf("  %5d / %d ...  acc %.4f\n", n, N_TEST_28, (double)correct/n); fflush(stdout); }
         }
-        double el = (double)(clock() - t0)/CLOCKS_PER_SEC;
+        clock_gettime(CLOCK_MONOTONIC, &T1);
+        double el = (T1.tv_sec - T0.tv_sec) + (T1.tv_nsec - T0.tv_nsec)/1e9;
         fclose(fx); fclose(fy);
         printf("\n===== full: %d / %d correct (%.2f%%)  [%.1fs, %.2fms/장] =====\n",
                correct, n, 100.0*correct/n, el, 1000.0*el/(n?n:1));

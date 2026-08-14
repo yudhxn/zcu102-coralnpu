@@ -1,52 +1,85 @@
-# 실제 ZCU102 보드에서 NPU 추론을 돌리는 CI
+# 실제 ZCU102 보드에서 Coral NPU 추론을 돌리는 CI
 #
-# 구조: GitHub → self-hosted 러너(연구실 Windows PC, 항상 켜짐)
-#              → plink(SSH)로 보드에 명령 → 실제 Coral NPU 추론 → 결과 검증
+# 구조
+#   git push → GitHub Actions → 연구실 PC(self-hosted 러너)
+#            → plink(SSH) → ZCU102 보드 → 실제 Coral NPU 추론 → 결과 검증
 #
-# 사전 준비 (ci/RUNNER_SETUP.md 참고):
-#   1) 연구실 PC에 self-hosted 러너 설치 (labels: zcu102-host)
-#   2) 리포 Settings → Secrets → Actions:
-#        BOARD_IP = 보드 IP,  BOARD_PW = root 비밀번호(기본 root)
-#   3) PC에서 한 번 수동으로 plink 접속해 호스트키 캐시
-#   4) 보드 SD의 FAT 파티션에 09_remote/board/ 폴더 복사돼 있어야 함
+# 왜 러너가 PC에 있나
+#   보드 rootfs 는 initramfs(램)라 재부팅하면 설치물이 사라진다.
+#   항상 켜져 있는 PC에 러너를 두고 PC→보드는 SSH 로 명령하는 구조가 견고하다.
+#
+# 사전 준비 (09_remote/ci/RUNNER_SETUP.md)
+#   1) PC에 self-hosted 러너 설치 (labels: zcu102-host)
+#   2) 리포 Secrets: BOARD_IP, BOARD_PW
+#   3) PC에서 plink 로 한 번 수동 접속해 호스트키 캐시
+#   4) 보드 SD 에 09_remote/board/ 폴더 복사 (make_sd_linux.ps1 이 처리)
 
 name: NPU inference on real ZCU102
 
 on:
   push:
     branches: [main]
-    paths: ['09_remote/**', '03_sw/**', '.github/workflows/board-infer.yml']
+    paths:
+      - '09_remote/**'
+      - '.github/workflows/board-infer.yml'
   workflow_dispatch:
     inputs:
       mode:
-        description: '8 = 검증된 8x8 데모 / 28 = 28x28 데모 / full = 10,000장 전수'
-        default: '28'
+        description: '28 = 데모 10장 / full = 10,000장 전수 / 8 = 구 8x8 데모'
+        default: 'full'
 
 jobs:
   infer-on-board:
     runs-on: [self-hosted, zcu102-host]
-    timeout-minutes: 30
+    timeout-minutes: 20
+    env:
+      BOARD: root@${{ secrets.BOARD_IP }}
+      PW: ${{ secrets.BOARD_PW }}
+      MODE: ${{ github.event.inputs.mode || 'full' }}
+
     steps:
-      - name: 보드 연결 확인
+      # ★ 보드 rootfs 는 initramfs(램)라 부팅할 때마다 SSH 호스트키가 새로 생성된다.
+      #   그래서 -batch 모드는 "키가 바뀌었다"며 멈춘다.
+      #   먼저 y 를 흘려넣어 새 키를 캐시한 뒤 본 작업을 진행한다.
+      - name: 호스트키 갱신 (보드 재부팅 대응)
         shell: cmd
-        run: plink -batch -pw ${{ secrets.BOARD_PW }} root@${{ secrets.BOARD_IP }} "uname -a && ls /run/media/mmcblk0p1/board || ls /media/*/board"
+        continue-on-error: true
+        run: echo y | plink -pw %PW% %BOARD% "true"
+
+      - name: 보드 살아있는지 확인
+        shell: cmd
+        run: |
+          plink -batch -pw %PW% %BOARD% "uname -srm; cat /proc/cmdline"
+
+      - name: 부팅 옵션 확인 (이게 없으면 NPU 접근 시 보드가 멈춘다)
+        shell: pwsh
+        run: |
+          $c = plink -batch -pw $env:PW $env:BOARD "cat /proc/cmdline"
+          Write-Host $c
+          if ($c -notmatch 'clk_ignore_unused') { throw 'clk_ignore_unused 없음 — 이미지 재빌드 필요' }
+          if ($c -notmatch 'pd_ignore_unused')  { throw 'pd_ignore_unused 없음 — 이미지 재빌드 필요' }
+          Write-Host 'OK'
 
       - name: NPU 추론 실행
-        shell: cmd
-        run: plink -batch -pw ${{ secrets.BOARD_PW }} root@${{ secrets.BOARD_IP }} "sh /run/media/mmcblk0p1/board/run_demo.sh ${{ github.event.inputs.mode || '28' }}" > result.txt 2>&1 & type result.txt
+        shell: pwsh
+        run: |
+          plink -batch -pw $env:PW $env:BOARD "sh /run/media/mmcblk0p1/board/run_demo.sh $env:MODE" `
+            2>&1 | Tee-Object -FilePath result.txt
 
       - name: 결과 검증
         shell: pwsh
         run: |
           $r = Get-Content result.txt -Raw
-          Write-Host $r
-          if ($r -match "10 / 10 correct" -or $r -match "완전 일치 — PASS") {
-            Write-Host "== 보드 추론 검증 통과 =="
+          if ($env:MODE -eq 'full') {
+            if ($r -notmatch '9641 / 10000')        { throw '전수 정확도가 기대값(9641)과 다름' }
+            if ($r -notmatch '완전 일치')            { throw 'HW/EMU 불일치' }
           } else {
-            throw "보드 추론 결과가 기대와 다름"
+            if ($r -notmatch '(\d+) / 10 correct')  { throw '데모 결과를 못 찾음' }
           }
+          Write-Host '== 보드 추론 검증 통과 =='
 
       - name: 로그 보관
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: board-uart-log-${{ github.run_number }}
