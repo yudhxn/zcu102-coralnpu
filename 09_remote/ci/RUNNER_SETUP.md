@@ -23,6 +23,25 @@ SError 로 커널 패닉이 난다. (커널이 미사용 클럭·전원 도메�
 
 ## 1. PC 에 self-hosted 러너 설치 (10분, 1회)
 
+### ★ 설치 위치 — 사용자 폴더 안에 두지 말 것
+
+러너를 서비스로 돌리면 `NT AUTHORITY\NETWORK SERVICE` 계정으로 실행된다.
+이 계정은 `C:\Users\<이름>\...` 아래를 읽을 권한이 없어서 서비스가 즉시 죽는다.
+
+```
+System.UnauthorizedAccessException: Access to the path
+'C:\Users\ehdgn\SOTA\zcutonpu\zcu102-nvdla' is denied.
+```
+
+**`C:\actions-runner` 처럼 사용자 폴더 밖에 설치할 것.**
+(git 저장소 안에 두는 것도 피할 것 — 러너 파일이 350MB 넘는다)
+
+임시로 검증만 할 거라면 서비스 대신 로그인 계정으로 직접 띄우면 된다.
+```
+.\run.cmd
+```
+
+
 1. 리포 → **Settings → Actions → Runners → New self-hosted runner**
 2. **Windows / x64** 선택 → 나오는 명령을 PowerShell 에 그대로 붙여넣기
 3. `config.cmd` 가 **labels** 를 물으면 → `zcu102-host` 입력
