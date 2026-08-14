@@ -8,8 +8,11 @@
 #   · Secrets: BOARD_IP, BOARD_PW
 #   · PC에 plink (PuTTY) 설치 + PATH 등록
 #
-# ★ 시크릿은 job env 로 넘기지 말고 각 줄에 직접 넣는다.
-#   env 로 넘기면 cmd 셸에서 %VAR% 가 비어 전달되는 경우가 있다 (2026-08-13 실패).
+# ★ 겪은 함정 두 개 (2026-08-13)
+#   1) 시크릿을 job env 로 넘기면 cmd 셸에서 %VAR% 가 비어 전달된다.
+#      -> 각 명령줄에 직접 넣을 것.
+#   2) shell: pwsh 는 PowerShell 7 이 설치돼 있어야 한다. 윈도우 기본은 5.1 이므로
+#      shell: powershell 을 쓴다. (pwsh 로 두면 "command not found")
 
 name: NPU inference on real ZCU102
 
@@ -34,19 +37,19 @@ jobs:
       # 보드 rootfs 는 initramfs(램)라 부팅할 때마다 SSH 호스트키가 새로 생성된다.
       # -batch 모드는 바뀐 키를 만나면 멈추므로 먼저 y 를 흘려넣어 캐시한다.
       - name: 호스트키 갱신 (보드 재부팅 대응)
-        shell: pwsh
+        shell: powershell
         continue-on-error: true
         run: |
           "y" | plink -pw "${{ secrets.BOARD_PW }}" root@${{ secrets.BOARD_IP }} "true"
 
       - name: 보드 연결 확인
-        shell: pwsh
+        shell: powershell
         run: |
           plink -batch -pw "${{ secrets.BOARD_PW }}" root@${{ secrets.BOARD_IP }} "uname -srm"
 
       # 이 두 옵션이 없으면 커널이 PL 클럭·전원을 꺼버려 NPU 접근 시 보드가 멈춘다.
       - name: 부팅 옵션 확인
-        shell: pwsh
+        shell: powershell
         run: |
           $c = plink -batch -pw "${{ secrets.BOARD_PW }}" root@${{ secrets.BOARD_IP }} "cat /proc/cmdline"
           Write-Host $c
@@ -55,7 +58,7 @@ jobs:
           Write-Host 'OK'
 
       - name: NPU 추론 실행
-        shell: pwsh
+        shell: powershell
         run: |
           $mode = "${{ github.event.inputs.mode }}"
           if (-not $mode) { $mode = "full" }
@@ -65,7 +68,7 @@ jobs:
             Tee-Object -FilePath result.txt
 
       - name: 결과 검증
-        shell: pwsh
+        shell: powershell
         run: |
           $r = Get-Content result.txt -Raw
           $mode = "${{ github.event.inputs.mode }}"
